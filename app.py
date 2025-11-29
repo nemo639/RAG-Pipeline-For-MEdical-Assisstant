@@ -6,9 +6,9 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
-# -----------------------------------------------------
-# Load Embedding Model
-# -----------------------------------------------------
+# ----------------------------------------
+# Load Embeddings
+# ----------------------------------------
 @st.cache_resource
 def load_embeddings():
     return HuggingFaceEmbeddings(
@@ -17,16 +17,20 @@ def load_embeddings():
         encode_kwargs={"normalize_embeddings": True}
     )
 
-# -----------------------------------------------------
-# Load FAISS Vector DB
-# -----------------------------------------------------
+# ----------------------------------------
+# Load FAISS Index
+# ----------------------------------------
 @st.cache_resource
 def load_vectorstore(embeddings):
-    return FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
+    return FAISS.load_local(
+        "faiss_index",
+        embeddings,
+        allow_dangerous_deserialization=True
+    )
 
-# -----------------------------------------------------
+# ----------------------------------------
 # Load TinyLlama Model
-# -----------------------------------------------------
+# ----------------------------------------
 @st.cache_resource
 def load_llm():
     model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
@@ -36,6 +40,7 @@ def load_llm():
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(model_name)
+
     pipe = pipeline(
         "text-generation",
         model=model,
@@ -45,47 +50,43 @@ def load_llm():
     )
     return HuggingFacePipeline(pipeline=pipe)
 
-# -----------------------------------------------------
-# Build QA Chain
-# -----------------------------------------------------
+# ----------------------------------------
+# Build RAG QA Chain
+# ----------------------------------------
 def build_qa_chain(llm, vectorstore):
-    prompt = PromptTemplate(
-        template="""Use only the context below to answer.
+    template = """Use only the context below to answer.
 
 CONTEXT:
 {context}
 
 QUESTION: {question}
 
-ANSWER:""",
-        input_variables=["context", "question"]
-    )
-
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+ANSWER:"""
+    prompt = PromptTemplate(template=template, input_variables=["context","question"])
 
     return RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
-        retriever=retriever,
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
         chain_type_kwargs={"prompt": prompt},
         return_source_documents=True
     )
 
-# -----------------------------------------------------
+# ----------------------------------------
 # Streamlit UI
-# -----------------------------------------------------
+# ----------------------------------------
 st.title("🧠 Medical RAG Assistant")
-st.write("Ask anything related to clinical notes or diagnoses.")
+st.write("Ask any clinical question.")
 
 embeddings = load_embeddings()
 vectorstore = load_vectorstore(embeddings)
 llm = load_llm()
-qa_chain = build_qa_chain(llm, vectorstore)
+qa = build_qa_chain(llm, vectorstore)
 
 query = st.text_input("Enter your question:")
 
 if query:
-    result = qa_chain.invoke({"query": query})
+    result = qa.invoke({"query": query})
 
     st.subheader("Answer:")
     st.write(result["result"])
