@@ -1,4 +1,6 @@
 import streamlit as st
+import os
+import shutil
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
@@ -6,9 +8,27 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
-# ----------------------------------------
-# Load Embeddings
-# ----------------------------------------
+# --------------------------------------------------------
+# AUTO FIX: recreate faiss_index folder if files are loose
+# --------------------------------------------------------
+def ensure_faiss_folder():
+    if not os.path.exists("faiss_index"):
+        os.makedirs("faiss_index")
+
+    # If index.faiss exists in main directory → move it
+    if os.path.exists("index.faiss"):
+        shutil.move("index.faiss", "faiss_index/index.faiss")
+
+    if os.path.exists("index.pkl"):
+        shutil.move("index.pkl", "faiss_index/index.pkl")
+
+# Run the fix
+ensure_faiss_folder()
+
+
+# --------------------------------------------------------
+# Load Embedding Model
+# --------------------------------------------------------
 @st.cache_resource
 def load_embeddings():
     return HuggingFaceEmbeddings(
@@ -17,9 +37,9 @@ def load_embeddings():
         encode_kwargs={"normalize_embeddings": True}
     )
 
-# ----------------------------------------
-# Load FAISS Index
-# ----------------------------------------
+# --------------------------------------------------------
+# Load FAISS Vectorstore
+# --------------------------------------------------------
 @st.cache_resource
 def load_vectorstore(embeddings):
     return FAISS.load_local(
@@ -28,9 +48,9 @@ def load_vectorstore(embeddings):
         allow_dangerous_deserialization=True
     )
 
-# ----------------------------------------
-# Load TinyLlama Model
-# ----------------------------------------
+# --------------------------------------------------------
+# Load LLM
+# --------------------------------------------------------
 @st.cache_resource
 def load_llm():
     model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
@@ -50,9 +70,9 @@ def load_llm():
     )
     return HuggingFacePipeline(pipeline=pipe)
 
-# ----------------------------------------
-# Build RAG QA Chain
-# ----------------------------------------
+# --------------------------------------------------------
+# Build QA Chain
+# --------------------------------------------------------
 def build_qa_chain(llm, vectorstore):
     template = """Use only the context below to answer.
 
@@ -62,36 +82,39 @@ CONTEXT:
 QUESTION: {question}
 
 ANSWER:"""
-    prompt = PromptTemplate(template=template, input_variables=["context","question"])
+    prompt = PromptTemplate(template=template, input_variables=["context", "question"])
+
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
     return RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
+        retriever=retriever,
         chain_type_kwargs={"prompt": prompt},
         return_source_documents=True
     )
 
-# ----------------------------------------
+
+# --------------------------------------------------------
 # Streamlit UI
-# ----------------------------------------
+# --------------------------------------------------------
 st.title("🧠 Medical RAG Assistant")
-st.write("Ask any clinical question.")
+st.write("Ask any clinical or diagnostic question.")
 
 embeddings = load_embeddings()
 vectorstore = load_vectorstore(embeddings)
 llm = load_llm()
-qa = build_qa_chain(llm, vectorstore)
+qa_chain = build_qa_chain(llm, vectorstore)
 
 query = st.text_input("Enter your question:")
 
 if query:
-    result = qa.invoke({"query": query})
+    result = qa_chain.invoke({"query": query})
 
     st.subheader("Answer:")
     st.write(result["result"])
 
     st.subheader("Sources:")
     for doc in result["source_documents"]:
-        st.markdown(f"**{doc.metadata.get('note_id','unknown')}**")
-        st.write(doc.page_content[:250] + "...")
+        st.markdown(f"**{doc.metadata.get('note_id', 'unknown')}**")
+        st.write(doc.page_content[:200] + "...")
