@@ -2,19 +2,20 @@ streamlit==1.32.0
 
 # LangChain stable versions
 langchain==0.1.20
-langchain-core==0.1.52
 langchain-community==0.0.38
+langchain-core==0.1.52
 langchain-huggingface==0.0.3
 
-# Embeddings + FAISS
+# Sentence Transformers (lightweight, works on Streamlit Cloud)
 sentence-transformers==2.2.2
-faiss-cpu==1.7.4
 
-# Transformers stack
-transformers==4.37.2
-accelerate==0.25.0
-torch==2.1.0
+# FAISS compatible with Python 3.11 on CPU
+faiss-cpu==1.7.3
 
-# Additional dependencies
-tqdm
-numpy
+# Transformers - lightweight version that works without GPU
+transformers==4.35.0
+
+# Avoid installing heavy torch wheels → CPU-only
+torch==2.0.1
+
+# Avoid accelerate (causes errors)
