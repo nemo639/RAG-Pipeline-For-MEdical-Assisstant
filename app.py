@@ -12,14 +12,15 @@ from langchain.prompts import PromptTemplate
 # HF model loader
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
+
 # ---------------------------------------------------------
-# AUTO-FIX FAISS folder for uploaded single files
+# AUTO-FIX: Move uploaded FAISS files into a folder
 # ---------------------------------------------------------
 def ensure_faiss_folder():
     if not os.path.exists("faiss_index"):
         os.makedirs("faiss_index")
 
-    # user uploaded individually, so move them inside folder
+    # Move uploaded files inside the folder
     if os.path.exists("index.faiss"):
         shutil.move("index.faiss", "faiss_index/index.faiss")
 
@@ -28,10 +29,10 @@ def ensure_faiss_folder():
 
 ensure_faiss_folder()
 
+
 # ---------------------------------------------------------
-# Load Embeddings (cached)
+# Load Embeddings (NO caching here)
 # ---------------------------------------------------------
-@st.cache_resource
 def load_embeddings():
     return HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2",
@@ -39,20 +40,21 @@ def load_embeddings():
         encode_kwargs={"normalize_embeddings": True}
     )
 
+
 # ---------------------------------------------------------
-# Load FAISS Vector Store (cached)
-# FIX: prefix parameter with underscore to avoid hashing error
+# Load FAISS (NO caching — avoids all hashing errors)
 # ---------------------------------------------------------
-@st.cache_resource
-def load_vectorstore(_embeddings):
+def load_vectorstore():
+    embeddings = load_embeddings()
     return FAISS.load_local(
         "faiss_index",
-        _embeddings,
+        embeddings,
         allow_dangerous_deserialization=True
     )
 
+
 # ---------------------------------------------------------
-# Load TinyLlama LLM (cached)
+# Load TinyLlama LLM (cached safely)
 # ---------------------------------------------------------
 @st.cache_resource
 def load_llm():
@@ -74,8 +76,9 @@ def load_llm():
 
     return HuggingFacePipeline(pipeline=text_gen)
 
+
 # ---------------------------------------------------------
-# Build RetrievalQA RAG Chain
+# Build RAG RetrievalQA Chain
 # ---------------------------------------------------------
 def build_qa_chain(llm, vectorstore):
     prompt = PromptTemplate(
@@ -100,21 +103,22 @@ ANSWER:""",
         return_source_documents=True
     )
 
+
 # ---------------------------------------------------------
-# STREAMLIT APP UI
+# STREAMLIT UI
 # ---------------------------------------------------------
 st.title("🧠 Medical RAG Assistant")
-st.write("Query clinical notes and diagnostic knowledge using RAG.")
+st.write("Ask clinical questions. Answers come from your FAISS-indexed dataset.")
 
-embeddings = load_embeddings()
-vectorstore = load_vectorstore(embeddings)
+# Load components
+vectorstore = load_vectorstore()   # <- no caching!
 llm = load_llm()
 qa_chain = build_qa_chain(llm, vectorstore)
 
 query = st.text_input("Enter your question:")
 
 if query:
-    st.write("⏳ Searching…")
+    st.write("⏳ Processing your query…")
     result = qa_chain.invoke({"query": query})
 
     st.subheader("🟦 Answer")
@@ -123,4 +127,4 @@ if query:
     st.subheader("📄 Source Documents")
     for doc in result["source_documents"]:
         st.markdown(f"**Source ID:** {doc.metadata.get('note_id', 'N/A')}")
-        st.write(doc.page_content[:300] + "…")
+        st.write(doc.page_content[:350] + "…")
