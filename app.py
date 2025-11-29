@@ -14,13 +14,11 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
 
 # ---------------------------------------------------------
-# AUTO-FIX: Move uploaded FAISS files into a folder
+# MOVE UPLOADED FAISS FILES INTO A FOLDER
 # ---------------------------------------------------------
 def ensure_faiss_folder():
-    if not os.path.exists("faiss_index"):
-        os.makedirs("faiss_index")
+    os.makedirs("faiss_index", exist_ok=True)
 
-    # Move uploaded files inside the folder
     if os.path.exists("index.faiss"):
         shutil.move("index.faiss", "faiss_index/index.faiss")
 
@@ -31,56 +29,57 @@ ensure_faiss_folder()
 
 
 # ---------------------------------------------------------
-# Load Embeddings (NO caching here)
+# LOAD EMBEDDINGS
 # ---------------------------------------------------------
 def load_embeddings():
-    return HuggingFaceEmbeddings(
+    embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2",
         model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True}
+        encode_kwargs={"normalize_embeddings": True},
     )
+    return embeddings
 
 
 # ---------------------------------------------------------
-# Load FAISS (NO caching — avoids all hashing errors)
+# LOAD FAISS DB (NO CACHE)
 # ---------------------------------------------------------
 def load_vectorstore():
     embeddings = load_embeddings()
-    return FAISS.load_local(
+    vectorstore = FAISS.load_local(
         "faiss_index",
         embeddings,
-        allow_dangerous_deserialization=True
+        allow_dangerous_deserialization=True,
     )
+    return vectorstore
 
 
 # ---------------------------------------------------------
-# Load TinyLlama LLM (cached safely)
+# LOAD TINYLLAMA (NO CACHE)
 # ---------------------------------------------------------
-@st.cache_resource
 def load_llm():
     model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(model_name)
 
-    text_gen = pipeline(
-        "text-generation",
+    pipe = pipeline(
+        task="text-generation",
         model=model,
         tokenizer=tokenizer,
         max_new_tokens=256,
         temperature=0.7,
     )
 
-    return HuggingFacePipeline(pipeline=text_gen)
+    return HuggingFacePipeline(pipeline=pipe)
 
 
 # ---------------------------------------------------------
-# Build RAG RetrievalQA Chain
+# BUILD RETRIEVAL QA
 # ---------------------------------------------------------
 def build_qa_chain(llm, vectorstore):
+
     prompt = PromptTemplate(
         template="""Use ONLY the context below to answer the question.
 
@@ -90,41 +89,43 @@ CONTEXT:
 QUESTION: {question}
 
 ANSWER:""",
-        input_variables=["context", "question"]
+        input_variables=["context", "question"],
     )
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
-    return RetrievalQA.from_chain_type(
+    qa_chain = RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
         retriever=retriever,
         chain_type_kwargs={"prompt": prompt},
-        return_source_documents=True
+        return_source_documents=True,
     )
+
+    return qa_chain
 
 
 # ---------------------------------------------------------
 # STREAMLIT UI
 # ---------------------------------------------------------
 st.title("🧠 Medical RAG Assistant")
-st.write("Ask clinical questions. Answers come from your FAISS-indexed dataset.")
+st.write("Ask a clinical question based on the uploaded FAISS index.")
 
-# Load components
-vectorstore = load_vectorstore()   # <- no caching!
+# Load everything (no cache → no hashing errors)
+vectorstore = load_vectorstore()
 llm = load_llm()
 qa_chain = build_qa_chain(llm, vectorstore)
 
 query = st.text_input("Enter your question:")
 
 if query:
-    st.write("⏳ Processing your query…")
+    st.write("⏳ Processing…")
     result = qa_chain.invoke({"query": query})
 
-    st.subheader("🟦 Answer")
+    st.subheader("🔵 Answer")
     st.write(result["result"])
 
     st.subheader("📄 Source Documents")
     for doc in result["source_documents"]:
-        st.markdown(f"**Source ID:** {doc.metadata.get('note_id', 'N/A')}")
-        st.write(doc.page_content[:350] + "…")
+        st.write(f"**ID:** {doc.metadata.get('note_id', 'N/A')}")
+        st.write(doc.page_content[:300] + "…")
