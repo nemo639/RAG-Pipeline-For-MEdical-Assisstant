@@ -5,16 +5,13 @@ import shutil
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
-
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
-
 # ---------------------------------------------------------
-# Auto-fix FAISS folder (if user uploaded files individually)
+# Auto-fix FAISS folder
 # ---------------------------------------------------------
 def ensure_faiss_folder():
     if not os.path.exists("faiss_index"):
@@ -28,7 +25,6 @@ def ensure_faiss_folder():
 
 ensure_faiss_folder()
 
-
 # ---------------------------------------------------------
 # Load Embeddings
 # ---------------------------------------------------------
@@ -40,7 +36,6 @@ def load_embeddings():
         encode_kwargs={"normalize_embeddings": True}
     )
 
-
 # ---------------------------------------------------------
 # Load FAISS
 # ---------------------------------------------------------
@@ -51,7 +46,6 @@ def load_vectorstore(embeddings):
         embeddings,
         allow_dangerous_deserialization=True
     )
-
 
 # ---------------------------------------------------------
 # Load TinyLlama
@@ -76,14 +70,12 @@ def load_llm():
 
     return HuggingFacePipeline(pipeline=pipe)
 
-
 # ---------------------------------------------------------
-# Build RAG Chain (New LangChain v0.3+ API)
+# Build RAG QA Chain
 # ---------------------------------------------------------
-def build_rag_chain(llm, vectorstore):
-
+def build_qa(llm, vectorstore):
     prompt = PromptTemplate(
-        template="""Use ONLY the below context to answer.
+        template="""Use ONLY the context below to answer.
 
 CONTEXT:
 {context}
@@ -94,34 +86,32 @@ ANSWER:""",
         input_variables=["context", "question"]
     )
 
-    document_chain = create_stuff_documents_chain(llm, prompt)
-
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
-
-    rag_chain = create_retrieval_chain(retriever, document_chain)
-
-    return rag_chain
-
+    return RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
+        chain_type_kwargs={"prompt": prompt},
+        return_source_documents=True
+    )
 
 # ---------------------------------------------------------
 # Streamlit UI
 # ---------------------------------------------------------
 st.title("🧠 Medical RAG Assistant")
-st.write("Ask clinical questions. Answers come strictly from the FAISS-indexed notes.")
 
 embeddings = load_embeddings()
 vectorstore = load_vectorstore(embeddings)
 llm = load_llm()
-rag_chain = build_rag_chain(llm, vectorstore)
+qa_chain = build_qa(llm, vectorstore)
 
-query = st.text_input("Enter your question:")
+query = st.text_input("Ask a question:")
 
 if query:
-    response = rag_chain.invoke({"question": query})
+    result = qa_chain.invoke({"query": query})
 
-    st.subheader("Answer:")
-    st.write(response["answer"])
+    st.subheader("Answer")
+    st.write(result["result"])
 
-    st.subheader("Sources:")
-    for doc in response["context"]:
+    st.subheader("Sources")
+    for doc in result["source_documents"]:
         st.write(doc.page_content[:200] + "...")
