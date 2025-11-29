@@ -1,12 +1,15 @@
 import streamlit as st
 import os
 import shutil
+
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-from langchain.chains import RetrievalQA
+from langchain_community.chains import RetrievalQA  # ✅ FIXED
 from langchain.prompts import PromptTemplate
+
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+
 
 # --------------------------------------------------------
 # AUTO FIX: recreate faiss_index folder if files are loose
@@ -118,3 +121,4 @@ if query:
     for doc in result["source_documents"]:
         st.markdown(f"**{doc.metadata.get('note_id', 'unknown')}**")
         st.write(doc.page_content[:200] + "...")
+
