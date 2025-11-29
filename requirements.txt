@@ -1,10 +1,20 @@
-streamlit
+streamlit==1.32.0
+
+# LangChain stable versions
 langchain==0.1.20
-langchain-community==0.0.38
 langchain-core==0.1.52
-langchain-huggingface
-sentence-transformers
-faiss-cpu
-transformers
-accelerate
-torch
+langchain-community==0.0.38
+langchain-huggingface==0.0.3
+
+# Embeddings + FAISS
+sentence-transformers==2.2.2
+faiss-cpu==1.7.4
+
+# Transformers stack
+transformers==4.37.2
+accelerate==0.25.0
+torch==2.1.0
+
+# Additional dependencies
+tqdm
+numpy
