@@ -177,41 +177,55 @@ def create_chunks(df_notes, text_splitter):
 @st.cache_resource
 def load_models():
     """Load embedding model and LLM"""
-    # Load embeddings
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={'device': 'cpu'},
-        encode_kwargs={'normalize_embeddings': True}
-    )
-    
-    # Load LLM
-    model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    try:
+        # Load embeddings
+        st.write("Loading embedding model...")
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
+        )
+        
+        # Load LLM
+        st.write("Loading language model...")
+        model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            use_fast=True,
+            trust_remote_code=True
+        )
+        
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto",
-        low_cpu_mem_usage=True
-    )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float32,  # Use float32 for CPU compatibility
+            device_map="cpu",
+            low_cpu_mem_usage=True,
+            trust_remote_code=True
+        )
 
-    pipe = pipeline(
-        "text-generation",
-        model=model,
-        tokenizer=tokenizer,
-        max_new_tokens=256,
-        temperature=0.7,
-        top_p=0.95,
-        repetition_penalty=1.15,
-        do_sample=True
-    )
+        pipe = pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            max_new_tokens=256,
+            temperature=0.7,
+            top_p=0.95,
+            repetition_penalty=1.15,
+            do_sample=True,
+            device="cpu"
+        )
 
-    llm = HuggingFacePipeline(pipeline=pipe)
+        llm = HuggingFacePipeline(pipeline=pipe)
+        
+        return embeddings, llm
     
-    return embeddings, llm
+    except Exception as e:
+        st.error(f"Error loading models: {str(e)}")
+        st.info("💡 Tip: This app requires significant resources. Consider running locally or on a cloud VM.")
+        raise e
 
 def initialize_system(data_path):
     """Initialize the RAG system"""
