@@ -2,21 +2,24 @@ import streamlit as st
 import os
 import shutil
 
+# LangChain + HuggingFace
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
+# HF model loader
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
 # ---------------------------------------------------------
-# Auto-fix FAISS folder
+# AUTO-FIX FAISS folder for uploaded single files
 # ---------------------------------------------------------
 def ensure_faiss_folder():
     if not os.path.exists("faiss_index"):
         os.makedirs("faiss_index")
 
+    # user uploaded individually, so move them inside folder
     if os.path.exists("index.faiss"):
         shutil.move("index.faiss", "faiss_index/index.faiss")
 
@@ -26,7 +29,7 @@ def ensure_faiss_folder():
 ensure_faiss_folder()
 
 # ---------------------------------------------------------
-# Load Embeddings
+# Load Embeddings (cached)
 # ---------------------------------------------------------
 @st.cache_resource
 def load_embeddings():
@@ -37,18 +40,19 @@ def load_embeddings():
     )
 
 # ---------------------------------------------------------
-# Load FAISS
+# Load FAISS Vector Store (cached)
+# FIX: prefix parameter with underscore to avoid hashing error
 # ---------------------------------------------------------
 @st.cache_resource
-def load_vectorstore(embeddings):
+def load_vectorstore(_embeddings):
     return FAISS.load_local(
         "faiss_index",
-        embeddings,
+        _embeddings,
         allow_dangerous_deserialization=True
     )
 
 # ---------------------------------------------------------
-# Load TinyLlama
+# Load TinyLlama LLM (cached)
 # ---------------------------------------------------------
 @st.cache_resource
 def load_llm():
@@ -60,22 +64,22 @@ def load_llm():
 
     model = AutoModelForCausalLM.from_pretrained(model_name)
 
-    pipe = pipeline(
+    text_gen = pipeline(
         "text-generation",
         model=model,
         tokenizer=tokenizer,
         max_new_tokens=256,
-        temperature=0.7
+        temperature=0.7,
     )
 
-    return HuggingFacePipeline(pipeline=pipe)
+    return HuggingFacePipeline(pipeline=text_gen)
 
 # ---------------------------------------------------------
-# Build RAG QA Chain
+# Build RetrievalQA RAG Chain
 # ---------------------------------------------------------
-def build_qa(llm, vectorstore):
+def build_qa_chain(llm, vectorstore):
     prompt = PromptTemplate(
-        template="""Use ONLY the context below to answer.
+        template="""Use ONLY the context below to answer the question.
 
 CONTEXT:
 {context}
@@ -86,32 +90,37 @@ ANSWER:""",
         input_variables=["context", "question"]
     )
 
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+
     return RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
+        retriever=retriever,
         chain_type_kwargs={"prompt": prompt},
         return_source_documents=True
     )
 
 # ---------------------------------------------------------
-# Streamlit UI
+# STREAMLIT APP UI
 # ---------------------------------------------------------
 st.title("🧠 Medical RAG Assistant")
+st.write("Query clinical notes and diagnostic knowledge using RAG.")
 
 embeddings = load_embeddings()
 vectorstore = load_vectorstore(embeddings)
 llm = load_llm()
-qa_chain = build_qa(llm, vectorstore)
+qa_chain = build_qa_chain(llm, vectorstore)
 
-query = st.text_input("Ask a question:")
+query = st.text_input("Enter your question:")
 
 if query:
+    st.write("⏳ Searching…")
     result = qa_chain.invoke({"query": query})
 
-    st.subheader("Answer")
+    st.subheader("🟦 Answer")
     st.write(result["result"])
 
-    st.subheader("Sources")
+    st.subheader("📄 Source Documents")
     for doc in result["source_documents"]:
-        st.write(doc.page_content[:200] + "...")
+        st.markdown(f"**Source ID:** {doc.metadata.get('note_id', 'N/A')}")
+        st.write(doc.page_content[:300] + "…")
